@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mushir — Voice-First AI Mobility Assistant</title>
+  <meta name="description" content="Mushir is an accessible voice-first AI mobility assistant for blind and visually impaired users. Features auto-activated voice interaction, background camera obstacle tracking, and tactical audio navigation.">
+  <meta name="theme-color" content="#000000">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+
+  <!-- Google Fonts: Outfit & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- TensorFlow.js & COCO-SSD for On-Device Mobile Inference -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+
+  <link rel="stylesheet" href="/src/styles/main.css">
+</head>
+<body>
+  <div class="mushir-app-viewport" role="application" aria-label="Mushir Voice-First AI Mobility Assistant">
+    
+    <!-- Working Camera Identification in the Background -->
+    <div class="camera-background-container" aria-hidden="true">
+      <video id="camera-video" playsinline muted autoplay></video>
+      <canvas id="vision-canvas"></canvas>
+      <div class="camera-scrim-overlay"></div>
+    </div>
+
+    <!-- Minimal Header Bar -->
+    <header class="mushir-minimal-header" role="banner">
+      <div class="brand-group">
+        <div class="brand-badge" aria-hidden="true">M</div>
+        <div class="brand-info">
+          <h1>MUSHIR</h1>
+          <span class="subtag">AI Mobility Assistant</span>
+        </div>
+      </div>
+
+      <!-- Live Background Status Pills -->
+      <div class="header-status-pills" role="status">
+        <div class="pill active" id="status-camera" title="Live Camera Obstacle Tracking">
+          <span class="dot"></span>
+          <span>Camera: <strong id="camera-state-text">Active</strong></span>
+        </div>
+        <div class="pill active" id="status-voice" title="Auto Voice Recognition">
+          <span class="dot"></span>
+          <span>Voice: <strong id="voice-state-text">Listening</strong></span>
+        </div>
+        <div class="pill" id="status-api" title="API Status">
+          <span class="dot"></span>
+          <span id="api-state-text">Local AI</span>
+        </div>
+      </div>
+
+      <!-- Quick Settings Button -->
+      <button id="btn-open-settings" class="btn-settings-minimal" aria-label="Open Settings and API Key Configuration" title="Settings / API Key (Key: S)">
+        <span aria-hidden="true">⚙</span>
+        <span>Settings</span>
+      </button>
+    </header>
+
+    <!-- Foreground: Auto-Activated Round Voice Command Button & Controls -->
+    <main class="voice-center-stage" role="main">
+
+      <!-- Round-Shaped Auto-Activated Voice Button -->
+      <div class="voice-button-wrapper">
+        <div class="pulse-ring ring-1"></div>
+        <div class="pulse-ring ring-2"></div>
+        <button id="btn-voice-mic" class="btn-mic-round auto-listening" aria-label="Mushir Voice Assistant. Auto-activated. Tap or press Spacebar to toggle." title="Spacebar to Toggle Listening">
+          <span id="mic-icon" aria-hidden="true">🎙</span>
+        </button>
+      </div>
+
+      <div class="voice-prompt-label" id="mic-sublabel">
+        Auto-Listening Active · Speak Naturally or Press Spacebar
+      </div>
+
+      <!-- Speech Recognition Transcript & Spoken Response Console -->
+      <div class="voice-console-card" role="region" aria-label="Speech Feedback Console">
+        <div class="transcript-row" id="transcript-row">
+          <span class="transcript-tag">Heard:</span>
+          <span class="transcript-query" id="live-transcript">"Mushir, what is in front of me?"</span>
+        </div>
+
+        <div class="spoken-response-row" aria-live="assertive">
+          <span class="speaker-glyph" aria-hidden="true">🔊</span>
+          <div class="spoken-text" id="spoken-response-text">
+            Mushir is listening automatically. Live camera object identification active in background.
+          </div>
+        </div>
+      </div>
+
+      <!-- Background Obstacle Telemetry Ticker (Minimal, High-Contrast) -->
+      <div class="obstacle-telemetry-strip" role="status" aria-label="Active Obstacle Telemetry">
+        <div class="telemetry-item">
+          <span class="lbl">Path:</span>
+          <strong id="ticker-path-status">CLEAR</strong>
+        </div>
+        <div class="telemetry-divider">·</div>
+        <div class="telemetry-item">
+          <span class="lbl">Nearest:</span>
+          <strong id="ticker-nearest-obst">None &lt; 4m</strong>
+        </div>
+        <div class="telemetry-divider">·</div>
+        <div class="telemetry-item">
+          <span class="lbl">Action:</span>
+          <strong id="ticker-nearest-action">Stationary</strong>
+        </div>
+        <div class="telemetry-divider">·</div>
+        <div class="telemetry-item">
+          <span class="lbl">Maneuver:</span>
+          <strong id="ticker-maneuver">FORWARD (Straight)</strong>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Settings & API Key Modal -->
+    <div class="modal-overlay" id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="modal-content">
+        <h2 id="settings-title">⚙ Mushir Settings & APIs</h2>
+        
+        <!-- Gemini API Key Section -->
+        <div class="settings-group">
+          <label for="input-gemini-key">
+            <strong>Google Gemini API Key (Optional)</strong><br>
+            <span style="font-size: 0.78rem; color: #a0a0a0;">
+              Enables cloud vision-language scene reasoning. On-device YOLO/COCO-SSD obstacle alerts run locally 100% free without any key.
+            </span>
+          </label>
+          <input type="password" id="input-gemini-key" placeholder="AIzaSy..." class="settings-input" autocomplete="off">
+          <div style="display: flex; gap: 8px; margin-top: 6px;">
+            <button id="btn-save-key" class="btn-settings-action">Save API Key</button>
+            <button id="btn-clear-key" class="btn-settings-action subtle">Clear</button>
+          </div>
+          <span id="api-key-status-msg" style="font-size: 0.75rem; color: #a0a0a0; margin-top: 4px; display: block;"></span>
+        </div>
+
+        <!-- Language & Voice -->
+        <div class="settings-group">
+          <strong>Language & Speech Speed</strong>
+          <div style="display: flex; gap: 8px; margin-top: 6px;">
+            <button id="btn-lang-en" class="btn-settings-action active">English (en-US)</button>
+            <button id="btn-lang-hi" class="btn-settings-action">Hindi / हिन्दी (hi-IN)</button>
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 8px;">
+            <button id="btn-speed-down" class="btn-settings-action subtle">🐢 Speak Slower</button>
+            <button id="btn-speed-up" class="btn-settings-action subtle">🐇 Speak Faster</button>
+          </div>
+        </div>
+
+        <!-- Safety Notice -->
+        <div class="settings-group">
+          <strong>Assistive Safety Notice</strong>
+          <p style="font-size: 0.78rem; color: #a0a0a0; line-height: 1.4; margin-top: 4px;">
+            Mushir complements, never replaces, a primary white cane or guide dog. Obstacle alerts and tactical turn guidance are assistive suggestions.
+          </p>
+        </div>
+
+        <button class="btn-close-modal" id="btn-close-settings">Close Settings</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
