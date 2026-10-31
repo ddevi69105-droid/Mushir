@@ -425,13 +425,41 @@ class NavigationService {
       }
     }
 
-    // 3. Compute Distance (Haversine km)
+    // 3. Compute Real Walking Distance (OSRM Pedestrian Route with Haversine fallback)
     let distanceKm = this.calculateHaversineDistance(
       this.cameraPosition.lat, this.cameraPosition.lng,
       destCoords.lat, destCoords.lng
     );
 
-    // If standing at the same coordinate point, provide realistic walking threshold
+    let osrmSteps = null;
+    try {
+      const osrmUrl = `https://router.project-osrm.org/route/v1/foot/${this.cameraPosition.lng},${this.cameraPosition.lat};${destCoords.lng},${destCoords.lat}?overview=false&steps=true`;
+      const osrmRes = await fetch(osrmUrl);
+      if (osrmRes.ok) {
+        const osrmData = await osrmRes.json();
+        if (osrmData.code === 'Ok' && osrmData.routes && osrmData.routes.length > 0) {
+          const route = osrmData.routes[0];
+          distanceKm = Number((route.distance / 1000).toFixed(1));
+          if (route.legs && route.legs[0].steps && route.legs[0].steps.length > 0) {
+            osrmSteps = route.legs[0].steps.map(s => {
+              const modifier = s.maneuver.modifier || '';
+              const street = s.name || 'pedestrian walkway';
+              return {
+                directive: modifier.toUpperCase().includes('LEFT') ? 'TURN_LEFT' : (modifier.toUpperCase().includes('RIGHT') ? 'TURN_RIGHT' : 'FORWARD'),
+                title: modifier ? `TURN ${modifier.toUpperCase()}` : 'GO FORWARD',
+                distance: Math.round(s.distance),
+                where: `On ${street}`,
+                instruction: modifier ? `Turn ${modifier} onto ${street}.` : `Continue straight along ${street}.`,
+                icon: modifier.includes('left') ? '⬅' : (modifier.includes('right') ? '➡' : '⬆')
+              };
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("OSRM pedestrian route fallback to Haversine:", e);
+    }
+
     if (distanceKm < 0.1) {
       distanceKm = 1.4;
     }
@@ -464,7 +492,7 @@ class NavigationService {
     audioService.speak(spokenSentence, 'normal');
 
     // 6. Initiate background tactical pedestrian route
-    this.startDynamicRoute(destName, destCoords, distanceKm, moveGuidance);
+    this.startDynamicRoute(destName, destCoords, distanceKm, moveGuidance, osrmSteps);
 
     return {
       destination: destName,
@@ -475,42 +503,44 @@ class NavigationService {
     };
   }
 
-  startDynamicRoute(destName, destCoords, distanceKm, moveGuidance) {
+  startDynamicRoute(destName, destCoords, distanceKm, moveGuidance, customSteps = null) {
     const totalMeters = Math.round(distanceKm * 1000);
     const step1Dist = Math.min(60, Math.round(totalMeters * 0.15));
     const step2Dist = Math.max(30, Math.round(totalMeters * 0.25));
+
+    const defaultSteps = [
+      {
+        directive: moveGuidance.directive,
+        title: `MOVE ${moveGuidance.directive}`,
+        distance: step1Dist,
+        where: `Along main path towards ${destName}`,
+        instruction: `Move ${moveGuidance.en} for ${step1Dist} meters.`,
+        icon: moveGuidance.icon
+      },
+      {
+        directive: 'FORWARD',
+        title: 'GO FORWARD',
+        distance: step2Dist,
+        where: `Towards ${destName} corridor`,
+        instruction: `Continue straight forward along the tactile sidewalk for ${step2Dist} meters.`,
+        icon: '⬆'
+      },
+      {
+        directive: 'ARRIVED',
+        title: 'ARRIVE',
+        distance: 5,
+        where: `${destName} entrance`,
+        instruction: `You have reached ${destName}.`,
+        icon: '★'
+      }
+    ];
 
     this.activeRoute = {
       id: destName.toLowerCase().replace(/[^a-z]/g, '_'),
       name: destName,
       address: `${destName} Walkway`,
       coords: destCoords,
-      steps: [
-        {
-          directive: moveGuidance.directive,
-          title: `MOVE ${moveGuidance.directive}`,
-          distance: step1Dist,
-          where: `Along main path towards ${destName}`,
-          instruction: `Move ${moveGuidance.en} for ${step1Dist} meters.`,
-          icon: moveGuidance.icon
-        },
-        {
-          directive: 'FORWARD',
-          title: 'GO FORWARD',
-          distance: step2Dist,
-          where: `Towards ${destName} corridor`,
-          instruction: `Continue straight forward along the tactile sidewalk for ${step2Dist} meters.`,
-          icon: '⬆'
-        },
-        {
-          directive: 'ARRIVED',
-          title: 'ARRIVE',
-          distance: 5,
-          where: `${destName} entrance`,
-          instruction: `You have reached ${destName}.`,
-          icon: '★'
-        }
-      ]
+      steps: (customSteps && customSteps.length > 0) ? customSteps : defaultSteps
     };
 
     this.currentStepIndex = 0;
