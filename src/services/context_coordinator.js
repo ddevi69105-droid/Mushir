@@ -149,6 +149,15 @@ class ContextCoordinator {
   handleConversationalQuery(question) {
     const q = (question || '').toLowerCase();
 
+    if (q === 'hi' || q === 'hii' || q === 'hello' || q === 'hey' || q === 'namaste' || q.includes('who are you') || q.includes('who r u')) {
+      const isHi = audioService.currentLanguage.startsWith('hi');
+      const greeting = isHi
+        ? "नमस्ते, मैं मुशीर हूँ। मैं आपकी क्या मदद कर सकता हूँ? आप कहाँ जाना चाहते हैं?"
+        : "Hi, I am Mushir. How can I help you? Where do you want to go?";
+      audioService.speak(greeting, 'normal');
+      return;
+    }
+
     if (q.includes('locate') || q.includes('where i am') || q.includes('where am i') || q.includes('where i m') || q.includes('position')) {
       navigationService.identifyCurrentStandingLocation(true);
       return;

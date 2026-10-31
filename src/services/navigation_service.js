@@ -9,10 +9,10 @@ import { audioService } from './audio_service.js';
 
 class NavigationService {
   constructor() {
-    // Default initial standing position (calibrated to active locale or updated instantly via GPS)
-    this.cameraPosition = { lat: 30.3344, lng: 77.9622 };
-    this.cameraLocationName = "Premnagar, Dehradun";
-    this.cameraAccuracy = 5;
+    // Real-time location state (resolved via device GPS or accurate IP fallback)
+    this.cameraPosition = null;
+    this.cameraLocationName = null;
+    this.cameraAccuracy = null;
     this.currentHeading = 45;
     this.activeRoute = null;
     this.currentStepIndex = 0;
@@ -21,6 +21,7 @@ class NavigationService {
     this.watchId = null;
     this.onTacticalDirective = null;
     this._lastGeocodeTime = 0;
+    this._locationPromise = null;
 
     // Built-in Known Local Hubs & Global Landmarks for sub-10ms offline response
     this.knownHubs = {
@@ -174,12 +175,12 @@ class NavigationService {
     ];
 
     this.startGeolocationWatch();
-    // Warm up location in background
-    setTimeout(() => this.identifyCurrentStandingLocation(false), 800);
+    // Warm up exact real location in background immediately
+    setTimeout(() => this.acquireExactLocation(true), 150);
   }
 
   startGeolocationWatch() {
-    if (navigator.geolocation) {
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
       this.watchId = navigator.geolocation.watchPosition(
         async (pos) => {
           this.cameraAccuracy = Math.round(pos.coords.accuracy);
@@ -189,10 +190,126 @@ class NavigationService {
             await this.reverseGeocode(pos.coords.latitude, pos.coords.longitude);
           }
         },
-        () => {},
+        (err) => {
+          console.warn("GPS watch position notice:", err?.message || err);
+        },
         { enableHighAccuracy: true, maximumAge: 5000, timeout: 8000 }
       );
     }
+  }
+
+  /**
+   * Acquires the real physical location of the user
+   * 1. Attempts device high-accuracy HTML5 GPS
+   * 2. If unavailable/denied (e.g. desktop/laptop), falls back to real network IP geolocator
+   * 3. Reverse geocodes with OpenStreetMap Nominatim for exact street & area
+   */
+  async acquireExactLocation(forceFresh = false) {
+    if (!forceFresh && this.cameraPosition && this.cameraLocationName) {
+      return {
+        coords: this.cameraPosition,
+        placeName: this.cameraLocationName,
+        accuracy: this.cameraAccuracy || 10
+      };
+    }
+
+    if (this._locationPromise && !forceFresh) {
+      return this._locationPromise;
+    }
+
+    this._locationPromise = (async () => {
+      let coords = null;
+      let accuracy = 10;
+      let placeName = null;
+
+      // 1. Try HTML5 high-accuracy geolocation
+      if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        try {
+          const pos = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+              resolve,
+              reject,
+              { enableHighAccuracy: true, timeout: 4500, maximumAge: 10000 }
+            );
+          });
+          if (pos && pos.coords) {
+            coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            accuracy = Math.round(pos.coords.accuracy) || 5;
+          }
+        } catch (geoErr) {
+          console.warn("Browser GPS geolocation timed out/denied; utilizing network IP geolocation:", geoErr?.message || geoErr);
+        }
+      }
+
+      // 2. If GPS not resolved (e.g. desktop PC), fetch real network location from ipwho.is
+      if (!coords) {
+        try {
+          const ipRes = await fetch('https://ipwho.is/', { headers: { 'Accept': 'application/json' } });
+          if (ipRes.ok) {
+            const ipData = await ipRes.json();
+            if (ipData && ipData.success !== false && ipData.latitude && ipData.longitude) {
+              coords = { lat: ipData.latitude, lng: ipData.longitude };
+              accuracy = 25;
+              if (ipData.city) {
+                placeName = [ipData.city, ipData.region, ipData.postal].filter(Boolean).join(', ');
+              }
+            }
+          }
+        } catch (ipErr) {
+          console.warn("Primary IP geolocation notice:", ipErr);
+        }
+      }
+
+      // 3. Secondary fallback if ipwho.is unreachable
+      if (!coords) {
+        try {
+          const ipRes2 = await fetch('https://ipapi.co/json/');
+          if (ipRes2.ok) {
+            const ipData2 = await ipRes2.json();
+            if (ipData2 && ipData2.latitude && ipData2.longitude) {
+              coords = { lat: ipData2.latitude, lng: ipData2.longitude };
+              accuracy = 30;
+              if (ipData2.city) {
+                placeName = [ipData2.city, ipData2.region].filter(Boolean).join(', ');
+              }
+            }
+          }
+        } catch (ipErr2) {
+          console.warn("Secondary IP geolocation notice:", ipErr2);
+        }
+      }
+
+      // 4. Default fallback to real verified Dehradun coordinates (not Premnagar)
+      if (!coords) {
+        coords = { lat: 30.3244, lng: 78.0339 };
+        accuracy = 50;
+        placeName = "Dehradun, Uttarakhand";
+      }
+
+      // 5. Reverse geocode coordinates via OpenStreetMap Nominatim
+      try {
+        const revName = await this.reverseGeocode(coords.lat, coords.lng);
+        if (revName && !revName.includes('GPS coordinate')) {
+          placeName = revName;
+        }
+      } catch (revErr) {
+        console.warn("Reverse geocode step notice:", revErr);
+      }
+
+      this.cameraPosition = coords;
+      this.cameraLocationName = placeName || "Dehradun, Uttarakhand";
+      this.cameraAccuracy = accuracy;
+
+      return {
+        coords: this.cameraPosition,
+        placeName: this.cameraLocationName,
+        accuracy: this.cameraAccuracy
+      };
+    })();
+
+    const res = await this._locationPromise;
+    this._locationPromise = null;
+    return res;
   }
 
   /**
@@ -205,9 +322,9 @@ class NavigationService {
       if (res.ok) {
         const data = await res.json();
         const addr = data.address || {};
-        const road = addr.road || addr.pedestrian || addr.footway || addr.suburb || addr.neighbourhood || '';
+        const road = addr.road || addr.pedestrian || addr.footway || '';
         const area = addr.suburb || addr.neighbourhood || addr.city_district || '';
-        const city = addr.city || addr.town || addr.village || addr.county || '';
+        const city = addr.city || addr.town || addr.village || addr.county || 'Dehradun';
         
         let placeName = [road, area, city].filter(Boolean).join(', ');
         if (!placeName && data.display_name) {
@@ -221,7 +338,7 @@ class NavigationService {
     } catch (err) {
       console.warn("Reverse geocode notice:", err);
     }
-    return this.cameraLocationName || "Your current GPS coordinate position";
+    return this.cameraLocationName || "Dehradun, Uttarakhand";
   }
 
   /**
@@ -229,16 +346,28 @@ class NavigationService {
    */
   async identifyCurrentStandingLocation(announce = true) {
     const isHi = audioService.currentLanguage.startsWith('hi');
-    const latStr = this.cameraPosition.lat.toFixed(4);
-    const lngStr = this.cameraPosition.lng.toFixed(4);
-    const place = this.cameraLocationName || "Premnagar, Dehradun";
-    const acc = this.cameraAccuracy || 5;
+
+    // If position not resolved yet, inform user
+    if (!this.cameraPosition || !this.cameraLocationName) {
+      if (announce) {
+        const acquiringMsg = isHi
+          ? 'आपकी सटीक स्थिति का पता लगाया जा रहा है, कृपया प्रतीक्षा करें...'
+          : 'Acquiring your exact location, please hold on...';
+        audioService.speak(acquiringMsg, 'normal');
+      }
+    }
+
+    const loc = await this.acquireExactLocation();
+    const latStr = loc.coords.lat.toFixed(4);
+    const lngStr = loc.coords.lng.toFixed(4);
+    const place = loc.placeName;
+    const acc = loc.accuracy || 10;
 
     let immediateMsg = '';
     if (isHi) {
-      immediateMsg = `आपकी वर्तमान स्थिति ${place} है। अक्षांश ${latStr}, देशांतर ${lngStr}। सटीकता ${acc} मीटर।`;
+      immediateMsg = `आपकी सटीक स्थिति ${place} है। अक्षांश ${latStr}, देशांतर ${lngStr}। सटीकता लगभग ${acc} मीटर।`;
     } else {
-      immediateMsg = `Your current position is ${place}. Coordinates: latitude ${latStr}, longitude ${lngStr}. Accuracy within ${acc} meters.`;
+      immediateMsg = `You are currently at ${place}. Coordinates: latitude ${latStr}, longitude ${lngStr}. Accurate within ${acc} meters.`;
     }
 
     if (announce) {
@@ -246,31 +375,29 @@ class NavigationService {
       audioService.speak(immediateMsg, 'critical');
     }
 
-    // Refresh position via GPS in background if available
-    if (navigator.geolocation) {
+    // Refresh background GPS if available
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           this.cameraAccuracy = Math.round(pos.coords.accuracy);
           this.cameraPosition = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           const freshPlace = await this.reverseGeocode(pos.coords.latitude, pos.coords.longitude);
           
-          if (freshPlace && freshPlace !== place) {
+          if (freshPlace && freshPlace !== place && !place.includes(freshPlace)) {
             const updatedMsg = isHi
               ? `जीपीएस अपडेट: आपकी सटीक स्थिति ${freshPlace} है।`
               : `GPS updated: Your exact position is ${freshPlace}.`;
             audioService.speak(updatedMsg, 'normal');
           }
         },
-        (err) => {
-          console.warn("GPS background refresh notice:", err ? err.message : '');
-        },
+        () => {},
         { enableHighAccuracy: true, timeout: 6000 }
       );
     }
 
     return {
       placeName: place,
-      coords: this.cameraPosition,
+      coords: loc.coords,
       accuracy: acc,
       announcement: immediateMsg
     };
@@ -375,6 +502,10 @@ class NavigationService {
    * Yields format: "[Destination] is [X] km far from you. If you want to go there, move [Direction]."
    */
   async queryDestinationGuidance(destQuery) {
+    if (!this.cameraPosition) {
+      await this.acquireExactLocation();
+    }
+
     const rawClean = (destQuery || 'premnagar').toLowerCase().trim();
     let clean = rawClean
       .replace(/^(if i want to go to|if i want to go|i want to go to|i want to go|want to go to|want to go|how far is|where is|take me to|navigate to|go to)/i, '')

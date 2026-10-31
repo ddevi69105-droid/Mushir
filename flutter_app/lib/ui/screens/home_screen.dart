@@ -35,7 +35,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   late final Animation<double> _pulseAnimation;
 
   String _liveTranscript = 'Listening automatically... Speak naturally.';
-  String _spokenText = 'Mushir is ready. Camera perception and GPS navigation active in background.';
+  String _spokenText = 'Hi, I am Mushir. How can I help you? Where do you want to go?';
   List<DetectionResult> _activeDetections = [];
   bool _isListening = false;
 
@@ -96,8 +96,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _locationService.startPositionTracking();
     await _visionService.initializeCamera(widget.cameras);
 
-    // Greet user
-    await _ttsService.speak(AppConstants.safetyWarningEn, priority: SpeechPriority.critical);
+    // Greet user warmly
+    await _ttsService.speak('Hi, I am Mushir. How can I help you? Where do you want to go?', priority: SpeechPriority.normal);
 
     // Auto-start listening
     await Future.delayed(const Duration(milliseconds: 500));

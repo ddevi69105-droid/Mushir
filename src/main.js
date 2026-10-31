@@ -56,17 +56,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   await visionService.init(cameraVideo, visionCanvas);
   updateCameraState();
 
-  // 2. Initialize Headless Navigation Service in Background
-  navigationService.startNavigation('bus_station');
+  // 2. Warm up real-time exact location in background
+  navigationService.acquireExactLocation(true);
 
   // 3. Initialize API Status
   updateApiStatus();
   inputGeminiKey.value = geminiService.getApiKey();
 
-  // 4. Auto-Activate Voice Recognition on Startup
+  // 4. Greet the User on Startup and Auto-Activate Voice Recognition
   setTimeout(() => {
-    voiceService.startListening(true);
+    const isHi = audioService.currentLanguage.startsWith('hi');
+    const greeting = isHi
+      ? "नमस्ते, मैं मुशीर हूँ। मैं आपकी क्या मदद कर सकता हूँ? आप कहाँ जाना चाहते हैं?"
+      : "Hi, I am Mushir. How can I help you? Where do you want to go?";
+
+    spokenResponseText.textContent = greeting;
     audioService.playChime('wake');
+    audioService.speak(greeting, 'normal');
+
+    // Auto-activate voice listening so user can speak commands immediately
+    setTimeout(() => {
+      voiceService.startListening(true);
+    }, 600);
   }, 400);
 
   function updateCameraState() {
@@ -239,6 +250,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       case 'WHERE_AM_I':
         await navigationService.identifyCurrentStandingLocation(true);
         break;
+
+      case 'GREETING': {
+        const isHi = audioService.currentLanguage.startsWith('hi');
+        const greeting = isHi
+          ? "नमस्ते, मैं मुशीर हूँ। मैं आपकी क्या मदद कर सकता हूँ? आप कहाँ जाना चाहते हैं?"
+          : "Hi, I am Mushir. How can I help you? Where do you want to go?";
+        audioService.speak(greeting, 'normal');
+        break;
+      }
 
       case 'HELP': {
         const isHi = audioService.currentLanguage.startsWith('hi');

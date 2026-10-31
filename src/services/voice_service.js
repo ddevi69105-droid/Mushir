@@ -266,6 +266,19 @@ class VoiceService {
       };
     } else if (clean.includes('repeat that') || clean.includes('repeat')) {
       command = { type: 'REPEAT_LAST', raw: rawText };
+    } else if (
+      clean === 'hi' ||
+      clean === 'hii' ||
+      clean === 'hello' ||
+      clean === 'hey' ||
+      clean === 'namaste' ||
+      clean === 'hi mushir' ||
+      clean === 'hello mushir' ||
+      clean === 'hey mushir' ||
+      clean.includes('who are you') ||
+      clean.includes('who r u')
+    ) {
+      command = { type: 'GREETING', raw: rawText };
     } else if (clean.includes('help')) {
       command = { type: 'HELP', raw: rawText };
     } else {
