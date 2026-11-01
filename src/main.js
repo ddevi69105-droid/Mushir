@@ -56,29 +56,36 @@ document.addEventListener('DOMContentLoaded', async () => {
   await visionService.init(cameraVideo, visionCanvas);
   updateCameraState();
 
-  // 2. Warm up real-time exact location in background
-  navigationService.acquireExactLocation(true);
+  // 2. Fetch exact location & start auto greeting
+  (async () => {
+    try {
+      const loc = await navigationService.acquireExactLocation(true);
+      const place = loc?.placeName || navigationService.cameraLocationName || "Anand Chowk Lane, Dehradun";
+      const isHi = audioService.currentLanguage.startsWith('hi');
+      const greeting = isHi
+        ? `नमस्ते! आज मैं आपकी क्या मदद कर सकता हूँ, आप वर्तमान में ${place} स्थान पर हैं।`
+        : `Hii! How can I assist you today, you are currently on the location ${place}.`;
 
-  // 3. Initialize API Status
-  updateApiStatus();
-  inputGeminiKey.value = geminiService.getApiKey();
-
-  // 4. Greet the User on Startup and Auto-Activate Voice Recognition
-  setTimeout(() => {
-    const isHi = audioService.currentLanguage.startsWith('hi');
-    const greeting = isHi
-      ? "नमस्ते, मैं मुशीर हूँ। मैं आपकी क्या मदद कर सकता हूँ? आप कहाँ जाना चाहते हैं?"
-      : "Hi, I am Mushir. How can I help you? Where do you want to go?";
-
-    spokenResponseText.textContent = greeting;
-    audioService.playChime('wake');
-    audioService.speak(greeting, 'normal');
+      spokenResponseText.textContent = greeting;
+      audioService.playChime('wake');
+      audioService.speak(greeting, 'normal');
+    } catch (e) {
+      console.warn("Location acquisition notice on startup:", e);
+      const place = navigationService.cameraLocationName || "Anand Chowk Lane, Dehradun";
+      const isHi = audioService.currentLanguage.startsWith('hi');
+      const greeting = isHi
+        ? `नमस्ते! आज मैं आपकी क्या मदद कर सकता हूँ, आप वर्तमान में ${place} स्थान पर हैं।`
+        : `Hii! How can I assist you today, you are currently on the location ${place}.`;
+      spokenResponseText.textContent = greeting;
+      audioService.playChime('wake');
+      audioService.speak(greeting, 'normal');
+    }
 
     // Auto-activate voice listening so user can speak commands immediately
     setTimeout(() => {
       voiceService.startListening(true);
     }, 600);
-  }, 400);
+  })();
 
   function updateCameraState() {
     if (visionService.cameraPermissionGranted) {
@@ -252,10 +259,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         break;
 
       case 'GREETING': {
+        const place = navigationService.cameraLocationName || "Anand Chowk Lane, Dehradun";
         const isHi = audioService.currentLanguage.startsWith('hi');
         const greeting = isHi
-          ? "नमस्ते, मैं मुशीर हूँ। मैं आपकी क्या मदद कर सकता हूँ? आप कहाँ जाना चाहते हैं?"
-          : "Hi, I am Mushir. How can I help you? Where do you want to go?";
+          ? `नमस्ते! आज मैं आपकी क्या मदद कर सकता हूँ, आप वर्तमान में ${place} स्थान पर हैं।`
+          : `Hii! How can I assist you today, you are currently on the location ${place}.`;
         audioService.speak(greeting, 'normal');
         break;
       }

@@ -35,7 +35,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   late final Animation<double> _pulseAnimation;
 
   String _liveTranscript = 'Listening automatically... Speak naturally.';
-  String _spokenText = 'Hi, I am Mushir. How can I help you? Where do you want to go?';
+  String _spokenText = 'Hii! How can I assist you today, you are currently on the location Anand Chowk Lane, Dehradun.';
   List<DetectionResult> _activeDetections = [];
   bool _isListening = false;
 
@@ -96,8 +96,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _locationService.startPositionTracking();
     await _visionService.initializeCamera(widget.cameras);
 
-    // Greet user warmly
-    await _ttsService.speak('Hi, I am Mushir. How can I help you? Where do you want to go?', priority: SpeechPriority.normal);
+    // Fetch exact location and greet user warmly
+    final locResult = await _locationService.getCurrentLocation();
+    final place = locResult.location?.street != null 
+        ? '${locResult.location!.street}, ${locResult.location!.city ?? "Dehradun"}'
+        : (locResult.location?.address ?? 'Anand Chowk Lane, Dehradun');
+    final greeting = 'Hii! How can I assist you today, you are currently on the location $place.';
+    if (mounted) setState(() => _spokenText = greeting);
+    await _ttsService.speak(greeting, priority: SpeechPriority.normal);
 
     // Auto-start listening
     await Future.delayed(const Duration(milliseconds: 500));

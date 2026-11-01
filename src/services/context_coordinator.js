@@ -150,10 +150,11 @@ class ContextCoordinator {
     const q = (question || '').toLowerCase();
 
     if (q === 'hi' || q === 'hii' || q === 'hello' || q === 'hey' || q === 'namaste' || q.includes('who are you') || q.includes('who r u')) {
+      const place = navigationService.cameraLocationName || "Anand Chowk Lane, Dehradun";
       const isHi = audioService.currentLanguage.startsWith('hi');
       const greeting = isHi
-        ? "नमस्ते, मैं मुशीर हूँ। मैं आपकी क्या मदद कर सकता हूँ? आप कहाँ जाना चाहते हैं?"
-        : "Hi, I am Mushir. How can I help you? Where do you want to go?";
+        ? `नमस्ते! आज मैं आपकी क्या मदद कर सकता हूँ, आप वर्तमान में ${place} स्थान पर हैं।`
+        : `Hii! How can I assist you today, you are currently on the location ${place}.`;
       audioService.speak(greeting, 'normal');
       return;
     }

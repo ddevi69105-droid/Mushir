@@ -222,14 +222,53 @@ class NavigationService {
       let accuracy = 10;
       let placeName = null;
 
-      // 1. Try HTML5 high-accuracy geolocation
+      // Start network IP geolocation fetch in parallel for sub-second startup
+      const ipFetchPromise = (async () => {
+        try {
+          const ipRes = await fetch('https://ipwho.is/', { headers: { 'Accept': 'application/json' } });
+          if (ipRes.ok) {
+            const ipData = await ipRes.json();
+            if (ipData && ipData.success !== false && ipData.latitude && ipData.longitude) {
+              return {
+                lat: ipData.latitude,
+                lng: ipData.longitude,
+                accuracy: 25,
+                placeHint: [ipData.city, ipData.region, ipData.postal].filter(Boolean).join(', ')
+              };
+            }
+          }
+        } catch (ipErr) {
+          console.warn("Primary IP geolocation notice:", ipErr);
+        }
+
+        try {
+          const ipRes2 = await fetch('https://ipapi.co/json/');
+          if (ipRes2.ok) {
+            const ipData2 = await ipRes2.json();
+            if (ipData2 && ipData2.latitude && ipData2.longitude) {
+              return {
+                lat: ipData2.latitude,
+                lng: ipData2.longitude,
+                accuracy: 30,
+                placeHint: [ipData2.city, ipData2.region].filter(Boolean).join(', ')
+              };
+            }
+          }
+        } catch (ipErr2) {
+          console.warn("Secondary IP geolocation notice:", ipErr2);
+        }
+        return null;
+      })();
+
+      // 1. Try HTML5 high-accuracy geolocation with 1200ms timeout
       if (typeof navigator !== 'undefined' && navigator.geolocation) {
         try {
           const pos = await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('GPS timeout')), 1200);
             navigator.geolocation.getCurrentPosition(
-              resolve,
-              reject,
-              { enableHighAccuracy: true, timeout: 4500, maximumAge: 10000 }
+              (p) => { clearTimeout(timer); resolve(p); },
+              (err) => { clearTimeout(timer); reject(err); },
+              { enableHighAccuracy: true, timeout: 1200, maximumAge: 10000 }
             );
           });
           if (pos && pos.coords) {
@@ -237,49 +276,23 @@ class NavigationService {
             accuracy = Math.round(pos.coords.accuracy) || 5;
           }
         } catch (geoErr) {
-          console.warn("Browser GPS geolocation timed out/denied; utilizing network IP geolocation:", geoErr?.message || geoErr);
+          console.warn("Browser GPS unavailable or timed out; utilizing parallel IP geolocation:", geoErr?.message || geoErr);
         }
       }
 
-      // 2. If GPS not resolved (e.g. desktop PC), fetch real network location from ipwho.is
+      // 2. If GPS did not resolve, await parallel network IP lookup
       if (!coords) {
-        try {
-          const ipRes = await fetch('https://ipwho.is/', { headers: { 'Accept': 'application/json' } });
-          if (ipRes.ok) {
-            const ipData = await ipRes.json();
-            if (ipData && ipData.success !== false && ipData.latitude && ipData.longitude) {
-              coords = { lat: ipData.latitude, lng: ipData.longitude };
-              accuracy = 25;
-              if (ipData.city) {
-                placeName = [ipData.city, ipData.region, ipData.postal].filter(Boolean).join(', ');
-              }
-            }
+        const ipLoc = await ipFetchPromise;
+        if (ipLoc) {
+          coords = { lat: ipLoc.lat, lng: ipLoc.lng };
+          accuracy = ipLoc.accuracy;
+          if (ipLoc.placeHint) {
+            placeName = ipLoc.placeHint;
           }
-        } catch (ipErr) {
-          console.warn("Primary IP geolocation notice:", ipErr);
         }
       }
 
-      // 3. Secondary fallback if ipwho.is unreachable
-      if (!coords) {
-        try {
-          const ipRes2 = await fetch('https://ipapi.co/json/');
-          if (ipRes2.ok) {
-            const ipData2 = await ipRes2.json();
-            if (ipData2 && ipData2.latitude && ipData2.longitude) {
-              coords = { lat: ipData2.latitude, lng: ipData2.longitude };
-              accuracy = 30;
-              if (ipData2.city) {
-                placeName = [ipData2.city, ipData2.region].filter(Boolean).join(', ');
-              }
-            }
-          }
-        } catch (ipErr2) {
-          console.warn("Secondary IP geolocation notice:", ipErr2);
-        }
-      }
-
-      // 4. Default fallback to real verified Dehradun coordinates (not Premnagar)
+      // 3. Fallback to verified local coordinates (Dehradun center, NOT Premnagar)
       if (!coords) {
         coords = { lat: 30.3244, lng: 78.0339 };
         accuracy = 50;
