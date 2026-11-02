@@ -46,8 +46,49 @@ class SafetyCoordinator {
     if (!_isAssistanceActive) return;
 
     final now = DateTime.now();
+    final isHi = tts.currentLanguage.startsWith('hi');
 
-    // Check for critical center path hazard
+    // 1. Priority 1: URGENT GROUND HAZARDS (open manhole, pothole, stairs down)
+    final urgentGroundHazards = detections.where((d) {
+      final clean = d.label.toLowerCase();
+      final isGround = clean.contains('manhole') || clean.contains('pothole') || clean.contains('stairs down') || clean.contains('curb');
+      final dist = d.estimatedDistance ?? 2.0;
+      return isGround && dist < 2.8;
+    }).toList();
+
+    if (urgentGroundHazards.isNotEmpty && now.difference(_lastHazardWarning).inMilliseconds > 2500) {
+      _lastHazardWarning = now;
+      final h = urgentGroundHazards.first;
+      final distStr = h.estimatedDistance != null ? '${h.estimatedDistance!.toStringAsFixed(1)} मीटर' : 'समीप';
+      final distStrEn = h.estimatedDistance != null ? '${h.estimatedDistance!.toStringAsFixed(1)} meters' : 'ahead';
+      final msg = isHi
+          ? 'रुकिए! सामने $distStr पर ${h.label} है! तुरंत अपनी सफेद छड़ी से जमीन की जांच करें!'
+          : 'Stop! ${h.label} detected $distStrEn directly ahead! Probe ground with your white cane immediately!';
+      tts.speak(msg, priority: SpeechPriority.critical);
+      return;
+    }
+
+    // 2. Priority 2: APPROACHING DYNAMIC TRAFFIC (auto rickshaws, motorcycles, cattle)
+    final approachingTraffic = detections.where((d) {
+      final clean = d.label.toLowerCase();
+      final isTraffic = clean.contains('auto') || clean.contains('two wheeler') || clean.contains('motorcycle') || clean.contains('cattle') || clean.contains('bus');
+      final isApproaching = d.motionAction.toLowerCase().contains('approach') || d.motionAction.toLowerCase().contains('rapid');
+      final dist = d.estimatedDistance ?? 3.5;
+      return isTraffic && (isApproaching || dist < 2.8);
+    }).toList();
+
+    if (approachingTraffic.isNotEmpty && now.difference(_lastHazardWarning).inMilliseconds > 3000) {
+      _lastHazardWarning = now;
+      final t = approachingTraffic.first;
+      final distStr = t.estimatedDistance != null ? '${t.estimatedDistance!.toStringAsFixed(1)}m' : '';
+      final msg = isHi
+          ? 'चेतावनी: आपकी ${t.sectorLabel} पर ${t.label} $distStr आ रहा है। किनारे रहें।'
+          : 'Alert: ${t.label} approaching on your ${t.sectorLabel} $distStr. Stay clear of roadway.';
+      tts.speak(msg, priority: SpeechPriority.critical);
+      return;
+    }
+
+    // 3. Priority 3: STANDARD CENTER PATH OBSTACLES (poles, bollards, barricades, pedestrians)
     final centerHazards = detections.where(
       (d) => d.sector == SpatialSector.center &&
              d.estimatedDistance != null &&
@@ -55,16 +96,13 @@ class SafetyCoordinator {
              !d.isDistanceUncertain,
     ).toList();
 
-    if (centerHazards.isNotEmpty) {
-      // Avoid repeated panic alerts within 3 seconds
-      if (now.difference(_lastHazardWarning).inMilliseconds > 3000) {
-        _lastHazardWarning = now;
-        final hazard = centerHazards.first;
-        final msg = tts.currentLanguage.startsWith('hi')
-            ? 'सावधान: सामने ${hazard.label} है (${hazard.estimatedDistance!.toStringAsFixed(1)} मीटर)। कृपया गति धीमी करें और छड़ी से जांच करें।'
-            : 'Caution: ${hazard.label} directly ahead at ${hazard.estimatedDistance!.toStringAsFixed(1)} meters. Slow down and verify ground with white cane.';
-        tts.speak(msg, priority: SpeechPriority.critical);
-      }
+    if (centerHazards.isNotEmpty && now.difference(_lastHazardWarning).inMilliseconds > 3500) {
+      _lastHazardWarning = now;
+      final hazard = centerHazards.first;
+      final msg = isHi
+          ? 'सावधान: सामने ${hazard.label} है (${hazard.estimatedDistance!.toStringAsFixed(1)} मीटर)। गति धीमी करें।'
+          : 'Caution: ${hazard.label} directly ahead at ${hazard.estimatedDistance!.toStringAsFixed(1)} meters. Slow down.';
+      tts.speak(msg, priority: SpeechPriority.critical);
     }
   }
 
