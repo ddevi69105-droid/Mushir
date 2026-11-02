@@ -4,9 +4,11 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import '../core/constants/app_constants.dart';
 import '../models/detection_result.dart';
+import 'tflite_detection_service.dart';
 
 class VisionService {
   CameraController? _cameraController;
+  final TfliteDetectionService _tfliteService = TfliteDetectionService();
   bool _isProcessingFrame = false;
   bool _isModelLoaded = false;
   int _nextTrackId = 1;
@@ -18,6 +20,7 @@ class VisionService {
 
   bool get isModelLoaded => _isModelLoaded;
   CameraController? get cameraController => _cameraController;
+  TfliteDetectionService get tfliteService => _tfliteService;
 
   void addDetectionListener(void Function(List<DetectionResult>) listener) {
     _detectionListeners.add(listener);
@@ -45,7 +48,10 @@ class VisionService {
       );
 
       await _cameraController!.initialize();
-      _isModelLoaded = true; // Mobile inference pipeline initialized
+
+      // Initialize on-device TFLite model and labels
+      await _tfliteService.initialize();
+      _isModelLoaded = true;
 
       // Start live camera frame stream for computer vision
       await _startFrameStreaming();
@@ -86,65 +92,21 @@ class VisionService {
     }
   }
 
-  /// Real-time frame inference pipeline
+  /// Real-time frame inference pipeline via TFLite
   Future<List<DetectionResult>> _processCameraImage(CameraImage image) async {
-    // In production, image planes are fed into TFLite / ONNX Runtime Mobile Interpreter
-    // Here we run real-time optical frame analysis on luminance plane
     final List<DetectionResult> detections = [];
-    final plane = image.planes[0];
-    final bytes = plane.bytes;
-    final width = image.width;
-    final height = image.height;
+    final rawDetections = await _tfliteService.detectFromCameraImage(image);
 
-    // Sample central and lateral blocks to detect high-contrast obstacle contours
-    final step = 24;
-    int fgPixelsLeft = 0;
-    int fgPixelsCenter = 0;
-    int fgPixelsRight = 0;
-
-    int minX = width, maxX = 0, minY = height, maxY = 0;
-
-    for (int y = (height * 0.2).toInt(); y < (height * 0.85).toInt(); y += step) {
-      for (int x = (width * 0.15).toInt(); x < (width * 0.85).toInt(); x += step) {
-        final idx = y * plane.bytesPerRow + x;
-        if (idx < bytes.length) {
-          final lum = bytes[idx];
-          // Detect contrast differential indicating foreground obstacle
-          if (lum < 55 || lum > 200) {
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-
-            final normX = x / width;
-            if (normX < AppConstants.sectorNearLeftEnd) {
-              fgPixelsLeft++;
-            } else if (normX <= AppConstants.sectorCenterEnd) {
-              fgPixelsCenter++;
-            } else {
-              fgPixelsRight++;
-            }
-          }
-        }
-      }
-    }
-
-    // If significant obstacle cluster is present in the camera view
-    if (maxX > minX + 40 && maxY > minY + 50) {
-      final normX = (minX / width).clamp(0.0, 1.0);
-      final normY = (minY / height).clamp(0.0, 1.0);
-      final normW = ((maxX - minX) / width).clamp(0.05, 1.0);
-      final normH = ((maxY - minY) / height).clamp(0.08, 1.0);
-
-      final centerX = normX + normW / 2.0;
+    for (final raw in rawDetections) {
+      final centerX = (raw.box.left + raw.box.width / 2.0).clamp(0.0, 1.0);
       final sectorData = calculateSpatialSector(centerX);
-      final distanceData = calculateOpticalDistance('person', normH);
+      final distanceData = calculateOpticalDistance(raw.label, raw.box.height);
 
       detections.add(DetectionResult(
         id: _nextTrackId++,
-        label: 'Person / Obstacle',
-        confidence: 0.86,
-        boundingBox: Rect.fromLTWH(normX, normY, normW, normH),
+        label: raw.label.replaceAll('_', ' '),
+        confidence: raw.confidence,
+        boundingBox: raw.box,
         sector: sectorData['sector'] as SpatialSector,
         sectorLabel: sectorData['label'] as String,
         estimatedDistance: distanceData['distance'] as double?,
@@ -256,6 +218,7 @@ class VisionService {
   void dispose() {
     _cameraController?.dispose();
     _cameraController = null;
+    _tfliteService.dispose();
     _trackedObjects.clear();
     _detectionListeners.clear();
   }

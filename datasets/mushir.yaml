@@ -1,0 +1,37 @@
+# Mushir — AI Mobility Assistant Dataset Configuration
+# Standard Ultralytics YOLOv8 / YOLO11 training config
+# Optimized for Indian footpaths, pedestrian hazards, and road furniture
+
+path: ../datasets/mushir  # dataset root dir (relative to training script or absolute)
+train: images/train       # train images (70% - diverse walking sessions)
+val: images/val           # val images (20% - tuning evaluation)
+test: images/test         # test images (10% - held-out unseen locations)
+
+# 21 Classes for Indian Pedestrian Mobility & Street Navigation
+names:
+  0: person
+  1: auto_rickshaw
+  2: two_wheeler
+  3: car
+  4: bus
+  5: truck
+  6: bicycle
+  7: cattle
+  8: stray_dog
+  9: pole
+  10: bollard
+  11: pothole
+  12: open_manhole
+  13: stairs_down
+  14: stairs_up
+  15: curb
+  16: barricade
+  17: vendor_cart
+  18: tree_branch
+  19: traffic_light
+  20: crosswalk
+
+# Safety-Critical Priority Weights:
+# Surface Hazards (Urgent white-cane alerts): open_manhole, pothole, stairs_down
+# Physical Obstacles: pole, bollard, barricade, tree_branch, vendor_cart
+# Dynamic Obstacles: auto_rickshaw, two_wheeler, cattle, person
